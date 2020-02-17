@@ -1,0 +1,121 @@
+
+%{
+#include <iostream>
+#include <unistd.h>
+#include <fstream>
+#include <sstream>
+#include<string>
+#include<iostream>
+#include "CodeBuilder.cpp"
+
+using namespace std;
+#define YYDEBUG 1
+int yylex();
+int yyparse();
+int yyerror(string s);
+extern FILE *yyin;
+extern int yylineno;
+
+
+
+%}
+%define parse.error verbose
+%union {
+  std::string* str;
+}
+%start program
+%token DECLARE _BEGIN END
+%token IF THEN ELSE ENDIF
+%token WHILE DO ENDWHILE ENDDO FOR FROM TO DOWNTO ENDFOR READ WRITE
+%token EQ NEQ LE GE LEQ GEQ
+%token ASSIGN
+%token ERROR
+%token <str> pidentifier
+%token <str> num
+
+%type <str> value
+%type <str> identifier
+
+%left PLUS MINUS
+%left TIMES DIV MOD
+
+
+%%
+
+program:        DECLARE declarations             { __buildArrays(); __initValueOne(); }
+                _BEGIN   commands END              { __end(); }
+              | _BEGIN                            { __initValueOne(); }     
+                commands END                      { __end(); }
+;
+declarations: declarations ',' pidentifier                { __declareVariable(*$3, yylineno);}
+              | declarations',' pidentifier'('num':'num')' {__declareArray(*$3,*$5,*$7, yylineno); }
+              | pidentifier                               { __declareVariable(*$1, yylineno);}
+              | pidentifier'('num':'num')'                {__declareArray(*$1,*$3,*$5, yylineno); }
+;
+commands:     commands command
+              | command
+;
+command:      identifier ASSIGN expression';'               { __assign(*$1, yylineno);}
+              | IF condition THEN commands                  { __if_else();}
+                ELSE commands ENDIF                         { __endif();}
+              | IF condition THEN commands ENDIF            { __endif();}
+              | WHILE                                       { __while_do(); }
+                condition DO commands ENDWHILE              { __end_while(); }   
+              | DO     
+                                                   { __do_while(); }
+                commands WHILE condition ENDDO              { __end_do(); }
+              | FOR pidentifier FROM value TO value DO      { __for_to(*$2,*$4,*$6, yylineno);}
+                commands ENDFOR                             { __end_for_to(); }
+              | FOR pidentifier FROM value DOWNTO value DO  { __for_downto(*$2,*$4,*$6, yylineno);}
+                commands ENDFOR                             { __end_for_downto(); }
+              | READ identifier';'          { __read(*$2, yylineno);}
+              | WRITE value';'              { __write(*$2, yylineno);}
+;
+
+expression:   value                               {__value(*$1, yylineno);     }                           
+              | value PLUS value                  {__plus(*$1,*$3, yylineno);  }
+              | value MINUS value                 {__minus(*$1,*$3, yylineno); }
+              | value TIMES value                 {__times(*$1,*$3, yylineno); }
+              | value DIV value                   {__div(*$1,*$3, yylineno); }
+              | value MOD value                   {__mod(*$1,*$3, yylineno); }
+;
+condition:    value EQ value                      {__condEQ(*$1,*$3, yylineno);}
+              | value NEQ value                   {__condNEQ(*$1,*$3, yylineno);}
+              | value LE value                    {__condLE(*$1,*$3, yylineno);}
+              | value GE value                    {__condGE(*$1,*$3, yylineno);}
+              | value LEQ value                   {__condLEQ(*$1,*$3, yylineno);}
+              | value GEQ value                   {__condGEQ(*$1,*$3, yylineno);}
+;
+value:        num                         { __declareNumber(*$1); }
+              | identifier
+;
+identifier:   pidentifier                  { __pid(*$1, yylineno); }
+              | pidentifier'('pidentifier')' { __arrayPid(*$1,*$3, yylineno); }
+              | pidentifier'('num')'         { __arrayNumber(*$1,*$3, yylineno); }
+;
+
+%%
+int main(int argc, char* argv[])
+{
+    yyin = fopen(argv[1], "r");
+    if (yyin == NULL)
+        error("File does not exist:");
+    yyparse();
+
+
+
+    ofstream file;
+    file.open(argv[2]);
+
+    for (const Command& command:commands) {
+        file << cmdToString(command) << endl;
+    }
+    file.close();
+	  return 0;
+}
+
+int yyerror(string s)
+{
+     std::cerr <<  s << " - unrecognized token (line " << yylineno << ")" << std::endl;
+     exit(1);
+}
